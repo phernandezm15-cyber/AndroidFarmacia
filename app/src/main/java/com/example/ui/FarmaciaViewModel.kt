@@ -15,7 +15,6 @@ import com.example.domain.AiRepository
 import com.example.domain.FarmaciaAiContext
 import com.example.domain.PharmacyUtils
 import com.example.domain.SaleReceiptData
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -45,9 +44,7 @@ class FarmaciaViewModel(
   private val repo: FarmaciaRepository,
   private val aiRepo: AiRepository,
   private val currentUserId: String,
-  private val initialEmail: String,
   private val initialDisplayName: String,
-  private val initialEmailVerified: Boolean,
 ) : ViewModel() {
 
   private val _isInitializing = MutableStateFlow(true)
@@ -64,7 +61,7 @@ class FarmaciaViewModel(
       initialValue = null,
     )
 
-  val medicamentos: StateFlow<List<MedicamentoEntity>> = repo.observeMedicamentos(currentUserId)
+  val medicamentos: StateFlow<List<MedicamentoEntity>> = repo.observeMedicamentos()
     .safeCatch(emptyList(), "Error observando inventario")
     .stateIn(
       scope = viewModelScope,
@@ -72,7 +69,7 @@ class FarmaciaViewModel(
       initialValue = emptyList(),
     )
 
-  val proveedores: StateFlow<List<ProveedorEntity>> = repo.observeProveedores(currentUserId)
+  val proveedores: StateFlow<List<ProveedorEntity>> = repo.observeProveedores()
     .safeCatch(emptyList(), "Error observando proveedores")
     .stateIn(
       scope = viewModelScope,
@@ -80,7 +77,7 @@ class FarmaciaViewModel(
       initialValue = emptyList(),
     )
 
-  val clientes: StateFlow<List<ClienteEntity>> = repo.observeClientes(currentUserId)
+  val clientes: StateFlow<List<ClienteEntity>> = repo.observeClientes()
     .safeCatch(emptyList(), "Error observando clientes")
     .stateIn(
       scope = viewModelScope,
@@ -88,7 +85,7 @@ class FarmaciaViewModel(
       initialValue = emptyList(),
     )
 
-  val compras: StateFlow<List<CompraEntity>> = repo.observeCompras(currentUserId)
+  val compras: StateFlow<List<CompraEntity>> = repo.observeCompras()
     .safeCatch(emptyList(), "Error observando compras")
     .stateIn(
       scope = viewModelScope,
@@ -96,7 +93,7 @@ class FarmaciaViewModel(
       initialValue = emptyList(),
     )
 
-  val ventas: StateFlow<List<VentaWithItems>> = repo.observeVentas(currentUserId)
+  val ventas: StateFlow<List<VentaWithItems>> = repo.observeVentas()
     .safeCatch(emptyList(), "Error observando ventas")
     .stateIn(
       scope = viewModelScope,
@@ -104,7 +101,7 @@ class FarmaciaViewModel(
       initialValue = emptyList(),
     )
 
-  val users: StateFlow<List<UserEntity>> = repo.observeStaff(currentUserId)
+  val users: StateFlow<List<UserEntity>> = repo.observeStaff()
     .safeCatch(emptyList(), "Error observando personal")
     .stateIn(
       scope = viewModelScope,
@@ -141,7 +138,7 @@ class FarmaciaViewModel(
       ChatMessage(
         id = "welcome",
         isUser = false,
-        text = "👋 ¡Hola! Soy **FarmaIA**, tu asistente farmacéutico impulsado por **Gemini**.\n\nPregúntame sobre síntomas, monografías de medicamentos, interacciones o el estado en vivo de tu inventario y ventas en Cloud Firestore.",
+        text = "👋 ¡Hola! Soy **FarmaIA**, tu asistente farmacéutico impulsado por **Gemini**.\n\nPregúntame sobre síntomas, monografías de medicamentos, interacciones o el estado en vivo de tu inventario y ventas en la base de datos.",
       )
     )
   )
@@ -163,13 +160,8 @@ class FarmaciaViewModel(
     viewModelScope.launch {
       _isInitializing.value = true
       _workspaceError.value = null
-      repo.ensureUserWorkspaceInitialized(
-        userId = currentUserId,
-        email = initialEmail,
-        displayName = initialDisplayName,
-        isEmailVerified = initialEmailVerified,
-      ).onFailure { err ->
-        val msg = err.localizedMessage ?: "No se pudo sincronizar con Cloud Firestore"
+      repo.ensureWorkspaceSeeded(currentUserId, initialDisplayName).onFailure { err ->
+        val msg = err.localizedMessage ?: "No se pudo inicializar la base de datos local"
         _workspaceError.value = msg
         notify(msg, isError = true)
       }
@@ -178,13 +170,9 @@ class FarmaciaViewModel(
   }
 
   private fun <T> Flow<T>.safeCatch(fallback: T, logMsg: String): Flow<T> = catch { error ->
-    val firestoreError = generateSequence(error) { it.cause }
-      .filterIsInstance<FirebaseFirestoreException>()
-      .firstOrNull()
-    if (firestoreError == null && error is CancellationException) throw error
-    val rootError = firestoreError ?: error
-    Log.w(TAG, logMsg, rootError)
-    notify(rootError.localizedMessage ?: logMsg, isError = true)
+    if (error is CancellationException) throw error
+    Log.w(TAG, logMsg, error)
+    notify(error.localizedMessage ?: logMsg, isError = true)
     emit(fallback)
   }
 
@@ -218,20 +206,18 @@ class FarmaciaViewModel(
     }
     viewModelScope.launch {
       val role = if (isAdminRole) "admin" else "empleado"
-      repo.addStaffMember(currentUserId, nombre, email, role).fold(
+      repo.addStaffMember(nombre, email, role).fold(
         onSuccess = { member ->
-          notify("Colaborador registrado en la nube: ${member.nombre}")
+          notify("Colaborador guardado: ${member.nombre} (clave inicial: ${FarmaciaRepository.DEFAULT_STAFF_PASSWORD})")
           onSuccess()
         },
         onFailure = { err ->
-          val msg = err.localizedMessage ?: "No se pudo registrar colaborador"
-          onFailure(msg)
+          onFailure(err.localizedMessage ?: "No se pudo registrar colaborador")
         },
       )
     }
   }
 
-  // POS actions
   fun addToCart(medId: String): Boolean {
     val med = medicamentos.value.find { it.id == medId } ?: return false
     val current = _cart.value.find { it.medId == medId }?.cantidad ?: 0
@@ -287,7 +273,7 @@ class FarmaciaViewModel(
   fun completeSale(cashInput: String) {
     val user = currentUser.value ?: UserEntity(
       uid = currentUserId,
-      email = initialEmail,
+      email = "",
       nombre = initialDisplayName.ifBlank { "Usuario" },
       role = "empleado",
     )
@@ -310,7 +296,6 @@ class FarmaciaViewModel(
     viewModelScope.launch {
       _isProcessingSale.value = true
       repo.registrarVenta(
-        userId = currentUserId,
         items = items,
         descPct = _discountPct.value,
         vendedor = user,
@@ -340,18 +325,17 @@ class FarmaciaViewModel(
           notify("Venta ${saved.venta.codigo} guardada (${PharmacyUtils.q(saved.venta.total)})$ptsMsg")
         },
         onFailure = { err ->
-          notify(err.localizedMessage ?: "Error al registrar venta en Firestore", isError = true)
+          notify(err.localizedMessage ?: "Error al registrar venta", isError = true)
         },
       )
       _isProcessingSale.value = false
     }
   }
 
-  // Inventory CRUD
   fun saveMedicamento(med: MedicamentoEntity, onDone: () -> Unit) {
     viewModelScope.launch {
       val isNew = med.id.isBlank()
-      repo.saveMedicamento(currentUserId, med, medicamentos.value.size).fold(
+      repo.saveMedicamento(med, medicamentos.value.size).fold(
         onSuccess = {
           notify(if (isNew) "Producto guardado: ${med.nombre}" else "Producto actualizado: ${med.nombre}")
           onDone()
@@ -365,18 +349,17 @@ class FarmaciaViewModel(
 
   fun deleteMedicamento(med: MedicamentoEntity) {
     viewModelScope.launch {
-      repo.deleteMedicamento(currentUserId, med.id).fold(
+      repo.deleteMedicamento(med.id).fold(
         onSuccess = { notify("Producto eliminado: ${med.nombre}") },
         onFailure = { err -> notify(err.localizedMessage ?: "No se pudo eliminar", isError = true) },
       )
     }
   }
 
-  // Clients CRUD
   fun saveCliente(cliente: ClienteEntity, onDone: () -> Unit) {
     viewModelScope.launch {
       val isNew = cliente.id.isBlank()
-      repo.saveCliente(currentUserId, cliente, clientes.value.size).fold(
+      repo.saveCliente(cliente, clientes.value.size).fold(
         onSuccess = {
           notify(if (isNew) "Cliente registrado: ${cliente.nombre}" else "Cliente actualizado: ${cliente.nombre}")
           onDone()
@@ -390,18 +373,17 @@ class FarmaciaViewModel(
 
   fun deleteCliente(cliente: ClienteEntity) {
     viewModelScope.launch {
-      repo.deleteCliente(currentUserId, cliente.id).fold(
+      repo.deleteCliente(cliente.id).fold(
         onSuccess = { notify("Cliente eliminado: ${cliente.nombre}") },
         onFailure = { err -> notify(err.localizedMessage ?: "No se pudo eliminar cliente", isError = true) },
       )
     }
   }
 
-  // Suppliers CRUD
   fun saveProveedor(prov: ProveedorEntity, onDone: () -> Unit) {
     viewModelScope.launch {
       val isNew = prov.id.isBlank()
-      repo.saveProveedor(currentUserId, prov, proveedores.value.size).fold(
+      repo.saveProveedor(prov, proveedores.value.size).fold(
         onSuccess = {
           notify(if (isNew) "Proveedor registrado: ${prov.empresa}" else "Proveedor actualizado: ${prov.empresa}")
           onDone()
@@ -415,14 +397,13 @@ class FarmaciaViewModel(
 
   fun deleteProveedor(prov: ProveedorEntity) {
     viewModelScope.launch {
-      repo.deleteProveedor(currentUserId, prov.id).fold(
+      repo.deleteProveedor(prov.id).fold(
         onSuccess = { notify("Proveedor eliminado: ${prov.empresa}") },
         onFailure = { err -> notify(err.localizedMessage ?: "No se pudo eliminar proveedor", isError = true) },
       )
     }
   }
 
-  // Purchases
   fun registrarCompra(
     proveedorId: String,
     medId: String,
@@ -434,7 +415,7 @@ class FarmaciaViewModel(
   ) {
     viewModelScope.launch {
       val medName = medicamentos.value.find { it.id == medId }?.nombre ?: "Producto"
-      repo.registrarCompra(currentUserId, proveedorId, medId, cantidad, costo, estado, compras.value.size, nota).fold(
+      repo.registrarCompra(proveedorId, medId, cantidad, costo, estado, compras.value.size, nota).fold(
         onSuccess = {
           notify(
             if (estado == "Completado") "Compra registrada: +$cantidad uds. de $medName"
@@ -451,7 +432,7 @@ class FarmaciaViewModel(
 
   fun recibirCompra(compra: CompraEntity) {
     viewModelScope.launch {
-      repo.recibirCompra(currentUserId, compra.id).fold(
+      repo.recibirCompra(compra.id).fold(
         onSuccess = { ok ->
           if (ok) {
             val medName = medicamentos.value.find { it.id == compra.medId }?.nombre ?: compra.medId
@@ -465,7 +446,6 @@ class FarmaciaViewModel(
     }
   }
 
-  // Chatbot powered by Firebase AI Logic (Gemini)
   fun sendChatMessage(rawQuery: String) {
     val clean = rawQuery.trim()
     if (clean.isEmpty()) return

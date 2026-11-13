@@ -10,19 +10,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -32,7 +31,6 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalShipping
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.People
@@ -78,8 +76,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -90,6 +86,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.local.FarmaciaDatabase
+import com.example.data.local.UserEntity
 import com.example.data.preferences.SessionPreferences
 import com.example.data.repository.FarmaciaRepository
 import com.example.domain.FirebaseAiRepository
@@ -110,15 +108,6 @@ import com.example.ui.screens.PosScreen
 import com.example.ui.screens.ProveedoresScreen
 import com.example.ui.screens.ReportesScreen
 import com.example.ui.theme.FarmaciaTheme
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 
 sealed class FarmaciaRoute(val route: String, val label: String, val icon: ImageVector) {
@@ -129,7 +118,7 @@ sealed class FarmaciaRoute(val route: String, val label: String, val icon: Image
   data object Proveedores : FarmaciaRoute("proveedores", "Proveedores", Icons.Filled.LocalShipping)
   data object Compras : FarmaciaRoute("compras", "Compras", Icons.Filled.ShoppingBag)
   data object Reportes : FarmaciaRoute("reportes", "Reportes", Icons.Filled.Assessment)
-  data object Manuales : FarmaciaRoute("manuales", "Manuales", Icons.Filled.MenuBook)
+  data object Manuales : FarmaciaRoute("manuales", "Manuales", Icons.AutoMirrored.Filled.MenuBook)
 }
 
 private val ALL_ROUTES = listOf(
@@ -157,19 +146,12 @@ private val COMPACT_OVERFLOW_ROUTES = listOf(
   FarmaciaRoute.Manuales,
 )
 
-internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
-  val listener = FirebaseAuth.AuthStateListener { auth ->
-    trySend(auth.currentUser)
-  }
-  addAuthStateListener(listener)
-  awaitClose { removeAuthStateListener(listener) }
-}
-
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     configureAppCheck(this, intent)
-    enableEdgeToEdge()
+    runCatching { enableEdgeToEdge() }
+      .onFailure { Log.w("MainActivity", "enableEdgeToEdge failed", it) }
     setContent {
       FarmaciaAppRoot()
     }
@@ -177,18 +159,39 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FarmaciaAppRoot(auth: FirebaseAuth = Firebase.auth) {
+fun FarmaciaAppRoot(repositoryOverride: FarmaciaRepository? = null) {
   val context = LocalContext.current
-  val prefs = remember(context) { SessionPreferences(context.applicationContext) }
+  val appContext = context.applicationContext ?: context
+  val prefs = remember(appContext) { SessionPreferences(appContext) }
+  val repo = remember(appContext, repositoryOverride) {
+    repositoryOverride ?: FarmaciaRepository(FarmaciaDatabase.getInstance(appContext).dao())
+  }
   val darkMode by prefs.darkModeFlow.collectAsStateWithLifecycle(initialValue = false)
-  val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+  val loggedUid by prefs.loggedUserIdFlow.collectAsStateWithLifecycle(initialValue = null)
   val scope = rememberCoroutineScope()
 
+  var activeUser by remember { mutableStateOf<UserEntity?>(null) }
   var isSigningIn by remember { mutableStateOf(false) }
   var authError by remember { mutableStateOf<String?>(null) }
+  var authNotice by remember { mutableStateOf<String?>(null) }
+
+  LaunchedEffect(loggedUid) {
+    val uid = loggedUid
+    if (uid.isNullOrBlank()) {
+      activeUser = null
+    } else {
+      val found = repo.findUserById(uid)
+      if (found == null) {
+        prefs.setLoggedUserId(null)
+        activeUser = null
+      } else {
+        activeUser = found
+      }
+    }
+  }
 
   FarmaciaTheme(darkTheme = darkMode) {
-    val user = currentUser
+    val user = activeUser
     if (user == null) {
       val snackbarHostState = remember { SnackbarHostState() }
       Scaffold(
@@ -198,23 +201,58 @@ fun FarmaciaAppRoot(auth: FirebaseAuth = Firebase.auth) {
         LoginScreen(
           isSigningIn = isSigningIn,
           authError = authError,
-          onGoogleIdToken = { idToken ->
-            isSigningIn = true
+          authNotice = authNotice,
+          onClearMessages = {
             authError = null
-            val credential = GoogleAuthProvider.getCredential(idToken, null)
-            auth.signInWithCredential(credential)
-              .addOnSuccessListener {
-                isSigningIn = false
-              }
-              .addOnFailureListener { exc ->
-                Log.e("FarmaciaAuth", "Firebase signInWithCredential failed", exc)
-                isSigningIn = false
-                authError = exc.localizedMessage ?: "No se pudo autenticar con Firebase."
-              }
+            authNotice = null
           },
-          onAuthError = { err ->
-            isSigningIn = false
-            authError = err
+          onSignIn = { email, password ->
+            scope.launch {
+              isSigningIn = true
+              authError = null
+              authNotice = null
+              repo.loginUser(email, password).fold(
+                onSuccess = { logged ->
+                  prefs.setLoggedUserId(logged.uid)
+                  activeUser = logged
+                },
+                onFailure = { err ->
+                  authError = err.localizedMessage ?: "No se pudo iniciar sesión."
+                },
+              )
+              isSigningIn = false
+            }
+          },
+          onRegister = { nombre, email, password, role, adminCode ->
+            scope.launch {
+              isSigningIn = true
+              authError = null
+              authNotice = null
+              repo.registerUser(nombre, email, password, role, adminCode).fold(
+                onSuccess = { created ->
+                  prefs.setLoggedUserId(created.uid)
+                  activeUser = created
+                },
+                onFailure = { err ->
+                  authError = err.localizedMessage ?: "No se pudo crear la cuenta."
+                },
+              )
+              isSigningIn = false
+            }
+          },
+          onResetPasswordDirect = { email, newPassword, onSuccess, onError ->
+            scope.launch {
+              repo.resetPasswordDirect(email, newPassword).fold(
+                onSuccess = {
+                  authError = null
+                  authNotice = "Contraseña actualizada en la base de datos. Ya puedes iniciar sesión."
+                  onSuccess()
+                },
+                onFailure = { err ->
+                  onError(err.localizedMessage ?: "No se pudo actualizar la contraseña.")
+                },
+              )
+            }
           },
           modifier = Modifier.padding(innerPadding),
         )
@@ -227,15 +265,12 @@ fun FarmaciaAppRoot(auth: FirebaseAuth = Firebase.auth) {
             val app = checkNotNull(this[APPLICATION_KEY]) {
               "APPLICATION_KEY missing from CreationExtras"
             }
-            val databaseId = app.getString(R.string.firestore_database_id)
-            val firestore = FirebaseFirestore.getInstance(databaseId)
+            val vmRepo = repositoryOverride ?: FarmaciaRepository(FarmaciaDatabase.getInstance(app).dao())
             FarmaciaViewModel(
-              repo = FarmaciaRepository(firestore),
+              repo = vmRepo,
               aiRepo = FirebaseAiRepository(),
               currentUserId = user.uid,
-              initialEmail = user.email.orEmpty(),
-              initialDisplayName = user.displayName.orEmpty(),
-              initialEmailVerified = user.isEmailVerified,
+              initialDisplayName = user.nombre,
             )
           }
         },
@@ -244,15 +279,22 @@ fun FarmaciaAppRoot(auth: FirebaseAuth = Firebase.auth) {
       AuthenticatedPharmacyShell(
         vm = vm,
         darkMode = darkMode,
+        hasPasswordAuth = true,
+        onChangePassword = { currentPassword, newPassword, onSuccess, onError ->
+          scope.launch {
+            repo.changePasswordLoggedIn(user.uid, currentPassword, newPassword).fold(
+              onSuccess = { onSuccess() },
+              onFailure = { err -> onError(err.localizedMessage ?: "No se pudo cambiar la contraseña.") },
+            )
+          }
+        },
         onToggleDarkMode = {
           scope.launch { prefs.setDarkMode(!darkMode) }
         },
         onLogout = {
-          auth.signOut()
           scope.launch {
-            runCatching {
-              CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
-            }
+            prefs.setLoggedUserId(null)
+            activeUser = null
           }
         },
       )
@@ -265,6 +307,13 @@ fun FarmaciaAppRoot(auth: FirebaseAuth = Firebase.auth) {
 private fun AuthenticatedPharmacyShell(
   vm: FarmaciaViewModel,
   darkMode: Boolean,
+  hasPasswordAuth: Boolean,
+  onChangePassword: (
+    currentPassword: String,
+    newPassword: String,
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit,
+  ) -> Unit,
   onToggleDarkMode: () -> Unit,
   onLogout: () -> Unit,
 ) {
@@ -301,7 +350,7 @@ private fun AuthenticatedPharmacyShell(
       Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         FarmaciaLogo()
         CircularProgressIndicator()
-        Text("Sincronizando base de datos en Cloud Firestore...", style = MaterialTheme.typography.bodySmall)
+        Text("Cargando base de datos local...", style = MaterialTheme.typography.bodySmall)
       }
     }
     return
@@ -317,7 +366,7 @@ private fun AuthenticatedPharmacyShell(
       Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         FarmaciaLogo()
         Text(
-          text = workspaceError ?: "Error de conexión con Firestore",
+          text = workspaceError ?: "Error de acceso a la base de datos",
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.error,
           textAlign = TextAlign.Center,
@@ -626,7 +675,12 @@ private fun AuthenticatedPharmacyShell(
   }
 
   if (showRoleDialog && currentUser != null) {
-    RoleDetailsDialog(user = currentUser!!, onDismiss = { showRoleDialog = false })
+    RoleDetailsDialog(
+      user = currentUser!!,
+      hasPasswordAuth = hasPasswordAuth,
+      onChangePassword = onChangePassword,
+      onDismiss = { showRoleDialog = false },
+    )
   }
 
   if (showUsersDialog && currentUser?.isAdmin == true) {

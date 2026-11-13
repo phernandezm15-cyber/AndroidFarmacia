@@ -23,18 +23,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -383,10 +390,30 @@ fun VoiceSearchButton(
 }
 
 @Composable
-fun RoleDetailsDialog(user: UserEntity, onDismiss: () -> Unit) {
+fun RoleDetailsDialog(
+  user: UserEntity,
+  hasPasswordAuth: Boolean = false,
+  onChangePassword: (
+    currentPassword: String,
+    newPassword: String,
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit,
+  ) -> Unit = { _, _, _, _ -> },
+  onDismiss: () -> Unit,
+) {
   val ext = FarmaciaColors.extended
+  var showPasswordForm by remember { mutableStateOf(false) }
+  var currentPass by remember { mutableStateOf("") }
+  var newPass by remember { mutableStateOf("") }
+  var confirmPass by remember { mutableStateOf("") }
+  var showCurrent by remember { mutableStateOf(false) }
+  var showNew by remember { mutableStateOf(false) }
+  var isSaving by remember { mutableStateOf(false) }
+  var errorMsg by remember { mutableStateOf<String?>(null) }
+  var successMsg by remember { mutableStateOf<String?>(null) }
+
   AlertDialog(
-    onDismissRequest = onDismiss,
+    onDismissRequest = { if (!isSaving) onDismiss() },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(
@@ -398,7 +425,10 @@ fun RoleDetailsDialog(user: UserEntity, onDismiss: () -> Unit) {
       }
     },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
         Text("Usuario: ${user.nombre}", fontWeight = FontWeight.SemiBold)
         Text("Correo: ${user.email}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
@@ -418,10 +448,118 @@ fun RoleDetailsDialog(user: UserEntity, onDismiss: () -> Unit) {
           Text("• Consulta de catálogo, clientes Puntos Salud y FarmaIA.", style = MaterialTheme.typography.bodySmall)
           Text("• Corte de turno de ventas (sin edición de costos).", style = MaterialTheme.typography.bodySmall)
         }
+
+        if (hasPasswordAuth) {
+          HorizontalDivider()
+          TextButton(
+            onClick = {
+              showPasswordForm = !showPasswordForm
+              errorMsg = null
+              successMsg = null
+            },
+            modifier = Modifier.testTag("toggle_change_password_button"),
+          ) {
+            Icon(Icons.Filled.LockReset, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (showPasswordForm) "Ocultar cambio de contraseña" else "Cambiar contraseña directamente")
+          }
+
+          if (showPasswordForm) {
+            OutlinedTextField(
+              value = currentPass,
+              onValueChange = { currentPass = it; errorMsg = null },
+              label = { Text("Contraseña actual") },
+              visualTransformation = if (showCurrent) VisualTransformation.None else PasswordVisualTransformation(),
+              trailingIcon = {
+                IconButton(onClick = { showCurrent = !showCurrent }) {
+                  Icon(if (showCurrent) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, contentDescription = null)
+                }
+              },
+              singleLine = true,
+              enabled = !isSaving,
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_current_password_input"),
+            )
+            OutlinedTextField(
+              value = newPass,
+              onValueChange = { newPass = it; errorMsg = null },
+              label = { Text("Nueva contraseña") },
+              visualTransformation = if (showNew) VisualTransformation.None else PasswordVisualTransformation(),
+              trailingIcon = {
+                IconButton(onClick = { showNew = !showNew }) {
+                  Icon(if (showNew) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, contentDescription = null)
+                }
+              },
+              singleLine = true,
+              enabled = !isSaving,
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_new_password_input"),
+            )
+            OutlinedTextField(
+              value = confirmPass,
+              onValueChange = { confirmPass = it; errorMsg = null },
+              label = { Text("Confirmar nueva contraseña") },
+              visualTransformation = if (showNew) VisualTransformation.None else PasswordVisualTransformation(),
+              singleLine = true,
+              enabled = !isSaving,
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_confirm_password_input"),
+            )
+            if (!errorMsg.isNullOrBlank()) {
+              Text(errorMsg!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            if (!successMsg.isNullOrBlank()) {
+              Text(successMsg!!, color = ext.success, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
+            Button(
+              onClick = {
+                val analysis = PharmacyUtils.evaluatePasswordStrength(newPass)
+                if (currentPass.isBlank()) {
+                  errorMsg = "Ingresa tu contraseña actual."
+                  return@Button
+                }
+                if (!analysis.isAllowed) {
+                  errorMsg = analysis.feedback
+                  return@Button
+                }
+                if (newPass != confirmPass) {
+                  errorMsg = "Las contraseñas nuevas no coinciden."
+                  return@Button
+                }
+                isSaving = true
+                errorMsg = null
+                onChangePassword(
+                  currentPass,
+                  newPass,
+                  {
+                    isSaving = false
+                    currentPass = ""
+                    newPass = ""
+                    confirmPass = ""
+                    successMsg = "Contraseña actualizada correctamente."
+                  },
+                  { err ->
+                    isSaving = false
+                    errorMsg = err
+                  },
+                )
+              },
+              enabled = !isSaving,
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_save_password_button"),
+            ) {
+              Text(if (isSaving) "Guardando..." else "Guardar nueva contraseña")
+            }
+          }
+        }
       }
     },
     confirmButton = {
-      Button(onClick = onDismiss) { Text("Entendido") }
+      Button(onClick = onDismiss, enabled = !isSaving) { Text("Entendido") }
     },
   )
 }
@@ -594,7 +732,7 @@ fun UsersManagementDialog(
           OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("Correo de Google") },
+            label = { Text("Correo electrónico") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
           )

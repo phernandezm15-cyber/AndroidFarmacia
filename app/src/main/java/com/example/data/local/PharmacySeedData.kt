@@ -1,12 +1,5 @@
-package com.example.data.remote
+package com.example.data.local
 
-import com.example.data.local.ClienteEntity
-import com.example.data.local.CompraEntity
-import com.example.data.local.MedicamentoEntity
-import com.example.data.local.ProveedorEntity
-import com.example.data.local.VentaEntity
-import com.example.data.local.VentaItemEntity
-import com.example.data.local.VentaWithItems
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -14,7 +7,7 @@ import java.util.Locale
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-object FirestoreSeedData {
+object PharmacySeedData {
   data class InitialSeedBundle(
     val medicamentos: List<MedicamentoEntity>,
     val proveedores: List<ProveedorEntity>,
@@ -124,7 +117,7 @@ object FirestoreSeedData {
         ),
         items = listOf(
           VentaItemEntity(
-            itemId = 1,
+            itemId = 0,
             ventaId = ventaUuid,
             medId = med.id,
             nombre = med.nombre,

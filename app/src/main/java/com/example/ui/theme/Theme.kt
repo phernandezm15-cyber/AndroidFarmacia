@@ -1,6 +1,8 @@
 package com.example.ui.theme
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -154,10 +156,13 @@ fun FarmaciaTheme(
   val view = LocalView.current
   if (!view.isInEditMode) {
     SideEffect {
-      val window = (view.context as? Activity)?.window
-      if (window != null) {
-        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
-        WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
+      runCatching {
+        val window = view.context.findActivity()?.window
+        if (window != null) {
+          val controller = WindowCompat.getInsetsController(window, view)
+          controller.isAppearanceLightStatusBars = !darkTheme
+          controller.isAppearanceLightNavigationBars = !darkTheme
+        }
       }
     }
   }
@@ -175,4 +180,10 @@ fun FarmaciaTheme(
 object FarmaciaColors {
   val extended: FarmaciaExtendedColors
     @Composable get() = LocalFarmaciaColors.current
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+  is Activity -> this
+  is ContextWrapper -> baseContext.findActivity()
+  else -> null
 }

@@ -284,4 +284,14 @@ object PharmacyUtils {
 
   fun isValidEmail(email: String): Boolean =
     Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$").matches(email.trim())
+
+  fun extractPasswordResetCode(rawInput: String): String {
+    val trimmed = rawInput.trim()
+    if (trimmed.isEmpty()) return ""
+    val match = Regex("[?&]oobCode=([^&#]+)").find(trimmed)
+    val extracted = match?.groupValues?.getOrNull(1) ?: trimmed
+    return runCatching {
+      java.net.URLDecoder.decode(extracted, "UTF-8")
+    }.getOrDefault(extracted).trim()
+  }
 }

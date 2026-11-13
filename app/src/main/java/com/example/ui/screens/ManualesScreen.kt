@@ -59,25 +59,25 @@ fun ManualesScreen(
         listOf(
           "• Lenguaje: Kotlin con corrutinas, Flow y StateFlow reactivo.",
           "• Interfaz: Jetpack Compose + Material Design 3 + tipografía Plus Jakarta Sans.",
-          "• Persistencia en la Nube: Firebase Cloud Firestore en tiempo real + Jetpack DataStore.",
-          "• Autenticación e IA: Google Sign-In (Credential Manager) + Firebase AI Logic (Gemini).",
+          "• Base de Datos: Room SQLite relacional local con transacciones ACID + Jetpack DataStore.",
+          "• Autenticación e IA: Correo y contraseña (hash PBKDF2) + Firebase AI Logic (Gemini).",
           "• Exportación: PdfDocument nativo + FileProvider para PDF y CSV.",
         ),
       ),
       ManualSection(
         "2. Arquitectura MVVM y Capas",
         listOf(
-          "• Capa de Datos: FirestoreModels, FirestoreErrorHandler, SessionPreferences y FarmaciaRepository.",
+          "• Capa de Datos: FarmaciaDatabase, FarmaciaDao, Entities, PasswordHasher, SessionPreferences y FarmaciaRepository.",
           "• Capa de Dominio: PharmacyUtils, PharmacyVoiceMatcher, FirebaseAiRepository y ReportExporter.",
           "• Capa UI: FarmaciaViewModel con flujos StateFlow y pantallas modulares en Compose.",
         ),
       ),
       ManualSection(
-        "3. Modelo de Datos en Cloud Firestore",
+        "3. Modelo de Datos en SQLite (Room)",
         listOf(
-          "• /users/{uid}: userId, nombre, email, role (admin | empleado).",
-          "• /users/{uid}/medicamentos: código, nombre, principio, categoría, caducidad, precios y stock.",
-          "• /users/{uid}/clientes, proveedores, compras, ventas y staff con reglas Zero-Trust.",
+          "• users: uid, nombre, email (único), role (admin | empleado), passwordHash.",
+          "• medicamentos: código, nombre, principio, categoría, caducidad, precios y stock.",
+          "• clientes, proveedores, compras, ventas y venta_items con integridad transaccional.",
         ),
       ),
       ManualSection(
@@ -93,10 +93,11 @@ fun ManualesScreen(
   val usuarioSections = remember {
     listOf(
       ManualSection(
-        "1. Inicio de Sesión con Google",
+        "1. Inicio de Sesión y Registro",
         listOf(
-          "• Pulsa 'Continuar con Google' para autenticarte de forma segura con tu cuenta.",
-          "• Tus datos de inventario, ventas, clientes y proveedores se sincronizan automáticamente en la nube.",
+          "• Inicia sesión o crea tu cuenta con correo electrónico y contraseña guardados en la base de datos SQLite local.",
+          "• Para registrar una cuenta de Administrador se solicita el código maestro de autorización; las cuentas Empleado se crean de forma directa.",
+          "• Puedes cambiar tu contraseña desde '¿Olvidaste tu contraseña?' o desde Perfil y Permisos.",
         ),
       ),
       ManualSection(

@@ -15,12 +15,16 @@
         },
         "email": {
           "type": "string",
-          "description": "Google account email address."
+          "description": "User account email address."
         },
         "role": {
           "type": "string",
           "enum": ["admin", "empleado"],
           "description": "Role of the user inside the pharmacy workspace."
+        },
+        "adminCode": {
+          "type": "string",
+          "description": "Optional admin authorization code provided only during admin account creation."
         },
         "createdAt": {
           "type": "string",

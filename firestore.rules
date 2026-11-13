@@ -31,9 +31,17 @@ service cloud.firestore {
              request.auth.token.email_verified == true;
     }
 
+    function hasAdminProfile() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
     function isAdmin() {
       return isBootstrapAdmin() ||
-             (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+             (isSignedIn() && (
+               exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+               hasAdminProfile()
+             ));
     }
 
     function isValidTimestamp(ts) {
@@ -46,7 +54,15 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 100 &&
              data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
-             data.role in ['admin', 'empleado'];
+             data.role in ['admin', 'empleado'] &&
+             (!('adminCode' in data) || (data.adminCode is string && data.adminCode.size() <= 64));
+    }
+
+    function isValidAdminRegistration(data) {
+      return data.role == 'admin' &&
+             'adminCode' in data &&
+             data.adminCode is string &&
+             data.adminCode == 'farmaciadbadmin123';
     }
 
     function isValidMedicamento(data) {
@@ -117,16 +133,20 @@ service cloud.firestore {
     // --- USER WORKSPACE ROOT ---
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow list: if isBootstrapAdmin();
 
       allow create: if isSignedIn() &&
                        isValidId(userId) &&
                        request.auth.uid == userId &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['userId', 'nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'nombre', 'email', 'role', 'adminCode', 'createdAt', 'updatedAt']) &&
                        isValidUserProfile(incoming()) &&
-                       (incoming().role == 'empleado' || isAdmin()) &&
+                       (
+                         (incoming().role == 'empleado' && !('adminCode' in incoming())) ||
+                         isAdmin() ||
+                         isValidAdminRegistration(incoming())
+                       ) &&
                        isValidTimestamp(incoming().createdAt) &&
                        isValidTimestamp(incoming().updatedAt);
 

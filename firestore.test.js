@@ -65,10 +65,10 @@ test("Unauthenticated user: cannot read or write any collection", async () => {
   await assertFails(unauthDb.collection("users").doc(ALICE_UID).collection("ventas").get());
 });
 
-test("User profile: non-admin cannot self-assign admin role", async () => {
+test("User profile: non-admin cannot self-assign admin role without valid adminCode", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
     email: "alice@example.com",
-    email_verified: true,
+    email_verified: false,
   }).firestore();
 
   await assertFails(
@@ -81,12 +81,24 @@ test("User profile: non-admin cannot self-assign admin role", async () => {
       updatedAt: serverTimestamp(),
     })
   );
+
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      nombre: "Alice",
+      email: "alice@example.com",
+      role: "admin",
+      adminCode: "claveincorrecta",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
 });
 
-test("User profile: standard user can create empleado profile, bootstrap admin can create admin profile", async () => {
+test("User profile: empleado succeeds, admin with valid code succeeds, bootstrap admin succeeds", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
     email: "alice@example.com",
-    email_verified: true,
+    email_verified: false,
   }).firestore();
 
   await assertSucceeds(
@@ -100,7 +112,24 @@ test("User profile: standard user can create empleado profile, bootstrap admin c
     })
   );
 
-  // Email spoofing test: unverified admin email must be rejected
+  // Registration with valid admin authorization code succeeds
+  const newAdminDb = testEnv.authenticatedContext("new_admin_uid", {
+    email: "carlos@farmacia.com",
+    email_verified: false,
+  }).firestore();
+  await assertSucceeds(
+    newAdminDb.collection("users").doc("new_admin_uid").set({
+      userId: "new_admin_uid",
+      nombre: "Carlos Admin",
+      email: "carlos@farmacia.com",
+      role: "admin",
+      adminCode: "farmaciadbadmin123",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Email spoofing test: unverified admin email without adminCode must be rejected
   const spoofDb = testEnv.authenticatedContext("spoof_uid", {
     email: ADMIN_EMAIL,
     email_verified: false,
@@ -153,6 +182,14 @@ test("Shadow update & privilege escalation: cannot inject ghost fields or escala
   await assertFails(
     aliceDb.collection("users").doc(ALICE_UID).update({
       role: "admin",
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      role: "admin",
+      adminCode: "farmaciadbadmin123",
       updatedAt: serverTimestamp(),
     })
   );
