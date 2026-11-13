@@ -16,6 +16,7 @@ import com.example.domain.FarmaciaAiContext
 import com.example.domain.PharmacyUtils
 import com.example.domain.SaleReceiptData
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class ChatMessage(
@@ -152,8 +154,18 @@ class FarmaciaViewModel(
   private val _toasts = MutableSharedFlow<AppToast>(extraBufferCapacity = 8)
   val toasts = _toasts.asSharedFlow()
 
+  val isCloudBackend: Boolean = repo.isCloudBackend
+
   init {
     initializeWorkspace()
+    if (repo.isCloudBackend) {
+      viewModelScope.launch {
+        while (isActive) {
+          delay(LIVE_SYNC_INTERVAL_MS)
+          repo.refreshAll()
+        }
+      }
+    }
   }
 
   fun initializeWorkspace() {
@@ -161,11 +173,20 @@ class FarmaciaViewModel(
       _isInitializing.value = true
       _workspaceError.value = null
       repo.ensureWorkspaceSeeded(currentUserId, initialDisplayName).onFailure { err ->
-        val msg = err.localizedMessage ?: "No se pudo inicializar la base de datos local"
+        val msg = err.localizedMessage ?: "No se pudo conectar con la base de datos"
         _workspaceError.value = msg
         notify(msg, isError = true)
       }
       _isInitializing.value = false
+    }
+  }
+
+  fun refreshCloudData() {
+    viewModelScope.launch {
+      repo.refreshAll().fold(
+        onSuccess = { notify("Datos sincronizados con Supabase") },
+        onFailure = { err -> notify(err.localizedMessage ?: "Error al sincronizar", isError = true) },
+      )
     }
   }
 
@@ -496,5 +517,6 @@ class FarmaciaViewModel(
   private companion object {
     const val TAG = "FarmaciaVM"
     const val STOP_TIMEOUT_MILLIS = 5000L
+    const val LIVE_SYNC_INTERVAL_MS = 5000L
   }
 }

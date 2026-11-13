@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -86,10 +87,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.data.local.FarmaciaDatabase
 import com.example.data.local.UserEntity
 import com.example.data.preferences.SessionPreferences
 import com.example.data.repository.FarmaciaRepository
+import com.example.data.repository.FarmaciaRepositoryProvider
 import com.example.domain.FirebaseAiRepository
 import com.example.ui.FarmaciaViewModel
 import com.example.ui.components.ChatbotSheet
@@ -164,7 +165,7 @@ fun FarmaciaAppRoot(repositoryOverride: FarmaciaRepository? = null) {
   val appContext = context.applicationContext ?: context
   val prefs = remember(appContext) { SessionPreferences(appContext) }
   val repo = remember(appContext, repositoryOverride) {
-    repositoryOverride ?: FarmaciaRepository(FarmaciaDatabase.getInstance(appContext).dao())
+    repositoryOverride ?: FarmaciaRepositoryProvider.get(appContext)
   }
   val darkMode by prefs.darkModeFlow.collectAsStateWithLifecycle(initialValue = false)
   val loggedUid by prefs.loggedUserIdFlow.collectAsStateWithLifecycle(initialValue = null)
@@ -200,6 +201,7 @@ fun FarmaciaAppRoot(repositoryOverride: FarmaciaRepository? = null) {
       ) { innerPadding ->
         LoginScreen(
           isSigningIn = isSigningIn,
+          isCloudSupabase = repo.isCloudBackend,
           authError = authError,
           authNotice = authNotice,
           onClearMessages = {
@@ -265,7 +267,7 @@ fun FarmaciaAppRoot(repositoryOverride: FarmaciaRepository? = null) {
             val app = checkNotNull(this[APPLICATION_KEY]) {
               "APPLICATION_KEY missing from CreationExtras"
             }
-            val vmRepo = repositoryOverride ?: FarmaciaRepository(FarmaciaDatabase.getInstance(app).dao())
+            val vmRepo = repositoryOverride ?: FarmaciaRepositoryProvider.get(app)
             FarmaciaViewModel(
               repo = vmRepo,
               aiRepo = FirebaseAiRepository(),
@@ -464,6 +466,14 @@ private fun AuthenticatedPharmacyShell(
                   }
                 ) {
                   Icon(Icons.Filled.Notifications, contentDescription = "Alertas del sistema")
+                }
+              }
+              if (vm.isCloudBackend) {
+                IconButton(
+                  onClick = { vm.refreshCloudData() },
+                  modifier = Modifier.testTag("topbar_sync_button"),
+                ) {
+                  Icon(Icons.Filled.Sync, contentDescription = "Sincronizar con Supabase")
                 }
               }
               IconButton(

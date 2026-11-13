@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -82,6 +83,7 @@ import com.example.ui.theme.FarmaciaColors
 @Composable
 fun LoginScreen(
   isSigningIn: Boolean,
+  isCloudSupabase: Boolean,
   authError: String?,
   authNotice: String?,
   onSignIn: (email: String, password: String) -> Unit,
@@ -560,18 +562,40 @@ fun LoginScreen(
               }
             }
 
+            if (!isCloudSupabase) {
+              Surface(
+                color = FarmaciaColors.extended.warningContainer,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.testTag("supabase_config_notice"),
+              ) {
+                Text(
+                  text = "Para compartir datos entre varios celulares en Supabase, agrega SUPABASE_URL y SUPABASE_ANON_KEY en el panel Secrets de AI Studio (por ahora usa SQLite local).",
+                  color = FarmaciaColors.extended.warning,
+                  style = MaterialTheme.typography.labelSmall,
+                  fontWeight = FontWeight.Medium,
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp),
+                )
+              }
+            }
+
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
               Icon(
-                imageVector = Icons.Filled.Storage,
+                imageVector = if (isCloudSupabase) Icons.Filled.CloudDone else Icons.Filled.Storage,
                 contentDescription = null,
                 modifier = Modifier.size(15.dp),
                 tint = MaterialTheme.colorScheme.primary,
               )
               Text(
-                text = "Conectado a base de datos SQLite local (Room)",
+                text = if (isCloudSupabase) {
+                  "Conectado a Supabase PostgreSQL (Multi-dispositivo)"
+                } else {
+                  "Base de datos SQLite local (Room) · Configura Secrets para Supabase"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
