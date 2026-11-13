@@ -1,0 +1,169 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and pharmacy workspace metadata.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user."
+        },
+        "nombre": {
+          "type": "string",
+          "description": "Full display name of the user."
+        },
+        "email": {
+          "type": "string",
+          "description": "Google account email address."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "empleado"],
+          "description": "Role of the user inside the pharmacy workspace."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "nombre", "email", "role", "createdAt", "updatedAt"]
+    },
+    "Medicamento": {
+      "title": "Medicamento",
+      "description": "Pharmacy medication inventory item.",
+      "type": "object",
+      "properties": {
+        "codigo": { "type": "string", "description": "Barcode string." },
+        "nombre": { "type": "string", "description": "Commercial product name." },
+        "principio": { "type": "string", "description": "Active pharmacological ingredient." },
+        "categoria": { "type": "string", "description": "Therapeutic category." },
+        "caducidad": { "type": "string", "description": "Expiration date (yyyy-MM-dd)." },
+        "precioCompra": { "type": "number", "description": "Wholesale purchase cost in GTQ." },
+        "precioVenta": { "type": "number", "description": "Retail sale price in GTQ." },
+        "stock": { "type": "integer", "description": "Current stock unit count." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["codigo", "nombre", "principio", "categoria", "caducidad", "precioCompra", "precioVenta", "stock", "createdAt", "updatedAt"]
+    },
+    "Proveedor": {
+      "title": "Proveedor",
+      "description": "Pharmaceutical distributor or supplier.",
+      "type": "object",
+      "properties": {
+        "empresa": { "type": "string", "description": "Company name." },
+        "contacto": { "type": "string", "description": "Contact person name." },
+        "telefono": { "type": "string", "description": "Contact phone number." },
+        "correo": { "type": "string", "description": "Contact email address." },
+        "direccion": { "type": "string", "description": "Physical address." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["empresa", "contacto", "telefono", "correo", "direccion", "createdAt", "updatedAt"]
+    },
+    "Cliente": {
+      "title": "Cliente",
+      "description": "Customer registered in the Puntos Salud loyalty program.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string", "description": "Customer full name." },
+        "telefono": { "type": "string", "description": "Phone number." },
+        "nit": { "type": "string", "description": "Tax ID / NIT or CF." },
+        "puntos": { "type": "integer", "description": "Loyalty points balance." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["nombre", "telefono", "nit", "puntos", "createdAt", "updatedAt"]
+    },
+    "Compra": {
+      "title": "Compra",
+      "description": "Purchase order placed to a pharmaceutical supplier.",
+      "type": "object",
+      "properties": {
+        "codigo": { "type": "string", "description": "Purchase order code." },
+        "fecha": { "type": "integer", "description": "Order timestamp in epoch millis." },
+        "proveedorId": { "type": "string", "description": "Referenced supplier ID." },
+        "medId": { "type": "string", "description": "Referenced medication ID." },
+        "cantidad": { "type": "integer", "description": "Units ordered." },
+        "costo": { "type": "number", "description": "Unit cost in GTQ." },
+        "estado": { "type": "string", "enum": ["Pendiente", "Completado"], "description": "Order status." },
+        "nota": { "type": "string", "description": "Optional order note." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["codigo", "fecha", "proveedorId", "medId", "cantidad", "costo", "estado", "createdAt", "updatedAt"]
+    },
+    "Venta": {
+      "title": "Venta",
+      "description": "Immutable point-of-sale transaction receipt with bounded line items.",
+      "type": "object",
+      "properties": {
+        "codigo": { "type": "string", "description": "Invoice / receipt code." },
+        "fecha": { "type": "integer", "description": "Sale timestamp in epoch millis." },
+        "subtotal": { "type": "number", "description": "Subtotal before discount and tax." },
+        "descuento": { "type": "number", "description": "Discount amount in GTQ." },
+        "descPct": { "type": "number", "description": "Discount percentage." },
+        "iva": { "type": "number", "description": "12% IVA tax in GTQ." },
+        "total": { "type": "number", "description": "Final total in GTQ." },
+        "vendedorNombre": { "type": "string", "description": "Cashier display name." },
+        "vendedorId": { "type": "string", "description": "Optional cashier UID." },
+        "clienteId": { "type": "string", "description": "Optional customer ID." },
+        "puntos": { "type": "integer", "description": "Loyalty points awarded." },
+        "items": { "type": "array", "description": "Bounded list of sold line items (max 100)." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["codigo", "fecha", "subtotal", "descuento", "descPct", "iva", "total", "vendedorNombre", "puntos", "items", "createdAt", "updatedAt"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Collaborator record managed within the pharmacy workspace.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string", "description": "Staff full name." },
+        "email": { "type": "string", "description": "Staff email address." },
+        "role": { "type": "string", "enum": ["admin", "empleado"], "description": "Assigned pharmacy role." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["nombre", "email", "role", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user profile and workspace root."
+    },
+    "/users/{userId}/medicamentos/{medId}": {
+      "schema": { "$ref": "#/entities/Medicamento" },
+      "description": "Pharmacy medication inventory scoped to user workspace."
+    },
+    "/users/{userId}/proveedores/{provId}": {
+      "schema": { "$ref": "#/entities/Proveedor" },
+      "description": "Pharmaceutical suppliers scoped to user workspace."
+    },
+    "/users/{userId}/clientes/{clienteId}": {
+      "schema": { "$ref": "#/entities/Cliente" },
+      "description": "Customers and Puntos Salud balances scoped to user workspace."
+    },
+    "/users/{userId}/compras/{compraId}": {
+      "schema": { "$ref": "#/entities/Compra" },
+      "description": "Supplier purchase orders scoped to user workspace."
+    },
+    "/users/{userId}/ventas/{ventaId}": {
+      "schema": { "$ref": "#/entities/Venta" },
+      "description": "Immutable POS sales receipts scoped to user workspace."
+    },
+    "/users/{userId}/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Authorized pharmacy staff members scoped to user workspace."
+    }
+  }
+}

@@ -1,0 +1,314 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HARDENED HELPERS ---
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrapAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email == 'pabloalexander361@gmail.com' &&
+             request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() ||
+             (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // --- ENTITY VALIDATION BLUEPRINTS ---
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 100 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+             data.role in ['admin', 'empleado'];
+    }
+
+    function isValidMedicamento(data) {
+      return data.codigo is string && data.codigo.size() >= 1 && data.codigo.size() <= 64 &&
+             data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 120 &&
+             data.principio is string && data.principio.size() >= 1 && data.principio.size() <= 150 &&
+             data.categoria is string && data.categoria.size() >= 1 && data.categoria.size() <= 80 &&
+             data.caducidad is string && data.caducidad.size() >= 4 && data.caducidad.size() <= 20 &&
+             data.precioCompra is number && data.precioCompra >= 0 &&
+             data.precioVenta is number && data.precioVenta >= 0 &&
+             data.stock is int && data.stock >= 0;
+    }
+
+    function isValidProveedor(data) {
+      return data.empresa is string && data.empresa.size() >= 1 && data.empresa.size() <= 120 &&
+             data.contacto is string && data.contacto.size() >= 1 && data.contacto.size() <= 100 &&
+             data.telefono is string && data.telefono.size() >= 1 && data.telefono.size() <= 40 &&
+             data.correo is string && data.correo.size() >= 1 && data.correo.size() <= 150 &&
+             data.direccion is string && data.direccion.size() >= 1 && data.direccion.size() <= 200;
+    }
+
+    function isValidCliente(data) {
+      return data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 100 &&
+             data.telefono is string && data.telefono.size() >= 1 && data.telefono.size() <= 40 &&
+             data.nit is string && data.nit.size() >= 1 && data.nit.size() <= 30 &&
+             data.puntos is int && data.puntos >= 0;
+    }
+
+    function isValidCompra(data) {
+      return data.codigo is string && data.codigo.size() >= 1 && data.codigo.size() <= 40 &&
+             data.fecha is int && data.fecha > 0 &&
+             data.proveedorId is string && data.proveedorId.size() >= 1 && data.proveedorId.size() <= 128 &&
+             data.medId is string && data.medId.size() >= 1 && data.medId.size() <= 128 &&
+             data.cantidad is int && data.cantidad > 0 &&
+             data.costo is number && data.costo >= 0 &&
+             data.estado in ['Pendiente', 'Completado'] &&
+             (!('nota' in data) || data.nota == null || (data.nota is string && data.nota.size() <= 300));
+    }
+
+    function isValidVenta(data) {
+      return data.codigo is string && data.codigo.size() >= 1 && data.codigo.size() <= 40 &&
+             data.fecha is int && data.fecha > 0 &&
+             data.subtotal is number && data.subtotal >= 0 &&
+             data.descuento is number && data.descuento >= 0 &&
+             data.descPct is number && data.descPct >= 0 && data.descPct <= 100 &&
+             data.iva is number && data.iva >= 0 &&
+             data.total is number && data.total >= 0 &&
+             data.vendedorNombre is string && data.vendedorNombre.size() >= 1 && data.vendedorNombre.size() <= 100 &&
+             (!('vendedorId' in data) || data.vendedorId == null || (data.vendedorId is string && data.vendedorId.size() <= 128)) &&
+             (!('clienteId' in data) || data.clienteId == null || (data.clienteId is string && data.clienteId.size() <= 128)) &&
+             data.puntos is int && data.puntos >= 0 &&
+             data.items is list && data.items.size() >= 1 && data.items.size() <= 100 &&
+             data.items[0] is map;
+    }
+
+    function isValidStaffMember(data) {
+      return data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 100 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+             data.role in ['admin', 'empleado'];
+    }
+
+    // --- ADMIN LOOKUP COLLECTION (READ-ONLY FOR SELF) ---
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && request.auth.uid == adminId;
+      allow list, write: if false;
+    }
+
+    // --- USER WORKSPACE ROOT ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming()) &&
+                       (incoming().role == 'empleado' || isAdmin()) &&
+                       isValidTimestamp(incoming().createdAt) &&
+                       isValidTimestamp(incoming().updatedAt);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       (request.auth.uid == userId || isAdmin()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidTimestamp(incoming().updatedAt) &&
+                       (incoming().role == existing().role || isAdmin()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['nombre', 'email', 'role', 'updatedAt']);
+
+      allow delete: if false;
+
+      // --- MEDICAMENTOS ---
+      match /medicamentos/{medId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(medId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(medId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['codigo', 'nombre', 'principio', 'categoria', 'caducidad', 'precioCompra', 'precioVenta', 'stock', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['codigo', 'nombre', 'principio', 'categoria', 'caducidad', 'precioCompra', 'precioVenta', 'stock', 'createdAt', 'updatedAt']) &&
+                         isValidMedicamento(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(medId) &&
+                         isValidMedicamento(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'codigo', 'nombre', 'principio', 'categoria', 'caducidad',
+                           'precioCompra', 'precioVenta', 'stock', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(medId) && request.auth.uid == userId;
+      }
+
+      // --- PROVEEDORES ---
+      match /proveedores/{provId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(provId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(provId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['empresa', 'contacto', 'telefono', 'correo', 'direccion', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['empresa', 'contacto', 'telefono', 'correo', 'direccion', 'createdAt', 'updatedAt']) &&
+                         isValidProveedor(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(provId) &&
+                         isValidProveedor(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'empresa', 'contacto', 'telefono', 'correo', 'direccion', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(provId) && request.auth.uid == userId;
+      }
+
+      // --- CLIENTES ---
+      match /clientes/{clienteId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(clienteId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(clienteId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['nombre', 'telefono', 'nit', 'puntos', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['nombre', 'telefono', 'nit', 'puntos', 'createdAt', 'updatedAt']) &&
+                         isValidCliente(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(clienteId) &&
+                         isValidCliente(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'nombre', 'telefono', 'nit', 'puntos', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(clienteId) && request.auth.uid == userId;
+      }
+
+      // --- COMPRAS (with Terminal State Locking) ---
+      match /compras/{compraId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(compraId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(compraId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['codigo', 'fecha', 'proveedorId', 'medId', 'cantidad', 'costo', 'estado', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['codigo', 'fecha', 'proveedorId', 'medId', 'cantidad', 'costo', 'estado', 'nota', 'createdAt', 'updatedAt']) &&
+                         isValidCompra(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         exists(/databases/$(database)/documents/users/$(userId)/medicamentos/$(incoming().medId));
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(compraId) &&
+                         isValidCompra(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         (
+                           isAdmin() ||
+                           (
+                             existing().estado == 'Pendiente' &&
+                             incoming().estado == 'Completado' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'updatedAt'])
+                           )
+                         );
+
+        allow delete: if false;
+      }
+
+      // --- VENTAS (Immutable POS Audit Receipts) ---
+      match /ventas/{ventaId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(ventaId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(ventaId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['codigo', 'fecha', 'subtotal', 'descuento', 'descPct', 'iva', 'total', 'vendedorNombre', 'puntos', 'items', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['codigo', 'fecha', 'subtotal', 'descuento', 'descPct', 'iva', 'total', 'vendedorNombre', 'vendedorId', 'clienteId', 'puntos', 'items', 'createdAt', 'updatedAt']) &&
+                         isValidVenta(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow update, delete: if false;
+      }
+
+      // --- STAFF DIRECTORY ---
+      match /staff/{staffId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(staffId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(staffId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['nombre', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                         isValidStaffMember(incoming()) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(staffId) &&
+                         isValidStaffMember(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['nombre', 'email', 'role', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(staffId) && request.auth.uid == userId;
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<resources>
+    <string name="firestore_database_id" translatable="false">ai-studio-android-farmacia-c282d22a-9bac-4093-8ec1-6a9ea5e4bacb</string>
+    <string name="recaptcha_site_key" translatable="false">6LepvB0uAAAAAN5KAJjuAgzX5j6iJBAoezehGehO</string>
+</resources>
