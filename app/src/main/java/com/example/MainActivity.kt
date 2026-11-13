@@ -113,7 +113,7 @@ import kotlinx.coroutines.launch
 
 sealed class FarmaciaRoute(val route: String, val label: String, val icon: ImageVector) {
   data object Dashboard : FarmaciaRoute("dashboard", "Inicio", Icons.Filled.Dashboard)
-  data object Pos : FarmaciaRoute("pos", "POS", Icons.Filled.PointOfSale)
+  data object Pos : FarmaciaRoute("pos", "Ventas", Icons.Filled.PointOfSale)
   data object Inventario : FarmaciaRoute("inventario", "Inventario", Icons.Filled.Inventory2)
   data object Clientes : FarmaciaRoute("clientes", "Clientes", Icons.Filled.People)
   data object Proveedores : FarmaciaRoute("proveedores", "Proveedores", Icons.Filled.LocalShipping)
@@ -335,6 +335,7 @@ private fun AuthenticatedPharmacyShell(
   val selectedClientId by vm.selectedClientId.collectAsStateWithLifecycle()
   val lastReceipt by vm.lastReceipt.collectAsStateWithLifecycle()
   val isProcessingSale by vm.isProcessingSale.collectAsStateWithLifecycle()
+  val saleError by vm.saleError.collectAsStateWithLifecycle()
   val chatMessages by vm.chatMessages.collectAsStateWithLifecycle()
   val isBotThinking by vm.isBotThinking.collectAsStateWithLifecycle()
 
@@ -352,7 +353,10 @@ private fun AuthenticatedPharmacyShell(
       Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         FarmaciaLogo()
         CircularProgressIndicator()
-        Text("Cargando base de datos local...", style = MaterialTheme.typography.bodySmall)
+        Text(
+          text = if (vm.isCloudBackend) "Sincronizando con Supabase..." else "Cargando base de datos local...",
+          style = MaterialTheme.typography.bodySmall,
+        )
       }
     }
     return
@@ -406,6 +410,7 @@ private fun AuthenticatedPharmacyShell(
 
   BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
     val useRail = maxWidth >= 720.dp
+    val hideBottomFabForPosCheckout = !useRail && currentRoute == FarmaciaRoute.Pos.route && cart.isNotEmpty()
 
     Scaffold(
       snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -485,6 +490,14 @@ private fun AuthenticatedPharmacyShell(
                   contentDescription = if (darkMode) "Modo claro" else "Modo oscuro",
                 )
               }
+              if (hideBottomFabForPosCheckout) {
+                IconButton(
+                  onClick = { showChatbotSheet = true },
+                  modifier = Modifier.testTag("topbar_chatbot_button"),
+                ) {
+                  Icon(Icons.Filled.AutoAwesome, contentDescription = "Abrir FarmaIA", tint = MaterialTheme.colorScheme.primary)
+                }
+              }
               IconButton(
                 onClick = onLogout,
                 modifier = Modifier.testTag("topbar_logout_button"),
@@ -538,22 +551,24 @@ private fun AuthenticatedPharmacyShell(
         }
       },
       floatingActionButton = {
-        if (!focusMode) {
-          ExtendedFloatingActionButton(
-            onClick = { showChatbotSheet = true },
-            icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = "Abrir FarmaIA") },
-            text = { Text("FarmaIA") },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.testTag("chatbot_fab"),
-          )
-        } else {
-          FloatingActionButton(
-            onClick = { showChatbotSheet = true },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-          ) {
-            Icon(Icons.Filled.AutoAwesome, contentDescription = "FarmaIA")
+        if (!hideBottomFabForPosCheckout) {
+          if (!focusMode) {
+            ExtendedFloatingActionButton(
+              onClick = { showChatbotSheet = true },
+              icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = "Abrir FarmaIA") },
+              text = { Text("FarmaIA") },
+              containerColor = MaterialTheme.colorScheme.primary,
+              contentColor = MaterialTheme.colorScheme.onPrimary,
+              modifier = Modifier.testTag("chatbot_fab"),
+            )
+          } else {
+            FloatingActionButton(
+              onClick = { showChatbotSheet = true },
+              containerColor = MaterialTheme.colorScheme.primary,
+              contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+              Icon(Icons.Filled.AutoAwesome, contentDescription = "FarmaIA")
+            }
           }
         }
       },
@@ -616,15 +631,18 @@ private fun AuthenticatedPharmacyShell(
               selectedClientId = selectedClientId,
               focusMode = focusMode,
               isProcessing = isProcessingSale,
+              saleError = saleError,
               lastReceipt = lastReceipt,
               onToggleFocus = { vm.setFocusMode(!focusMode) },
               onAddToCart = { vm.addToCart(it) },
               onDecrementCart = { vm.decrementFromCart(it) },
               onRemoveCart = { vm.removeFromCart(it) },
+              onClearCart = { vm.clearCart() },
               onDiscountChange = { vm.setDiscountPct(it) },
               onClientChange = { vm.setSelectedClientId(it) },
               onScanCodeSubmit = { vm.addByBarcodeOrId(it) },
               onCompleteSale = { vm.completeSale(it) },
+              onClearSaleError = { vm.clearSaleError() },
               onClearReceipt = { vm.clearReceipt() },
             )
           }

@@ -135,6 +135,9 @@ class FarmaciaViewModel(
   private val _isProcessingSale = MutableStateFlow(false)
   val isProcessingSale: StateFlow<Boolean> = _isProcessingSale.asStateFlow()
 
+  private val _saleError = MutableStateFlow<String?>(null)
+  val saleError: StateFlow<String?> = _saleError.asStateFlow()
+
   private val _chatMessages = MutableStateFlow(
     listOf(
       ChatMessage(
@@ -251,6 +254,7 @@ class FarmaciaViewModel(
     } else {
       _cart.value + CartLineItem(med.id, med.nombre, med.precioVenta, 1)
     }
+    _saleError.value = null
     return true
   }
 
@@ -258,18 +262,31 @@ class FarmaciaViewModel(
     _cart.value = _cart.value
       .map { if (it.medId == medId) it.copy(cantidad = it.cantidad - 1) else it }
       .filter { it.cantidad > 0 }
+    _saleError.value = null
   }
 
   fun removeFromCart(medId: String) {
     _cart.value = _cart.value.filterNot { it.medId == medId }
+    _saleError.value = null
+  }
+
+  fun clearCart() {
+    _cart.value = emptyList()
+    _discountPct.value = 0.0
+    _saleError.value = null
   }
 
   fun setDiscountPct(pct: Double) {
     _discountPct.value = pct
+    _saleError.value = null
   }
 
   fun setSelectedClientId(clientId: String?) {
     _selectedClientId.value = clientId
+  }
+
+  fun clearSaleError() {
+    _saleError.value = null
   }
 
   fun addByBarcodeOrId(codeInput: String): Boolean {
@@ -300,17 +317,23 @@ class FarmaciaViewModel(
     )
     val items = _cart.value
     if (items.isEmpty()) {
-      notify("El ticket está vacío", isError = true)
+      val msg = "El ticket está vacío"
+      _saleError.value = msg
+      notify(msg, isError = true)
       return
     }
     val totals = PharmacyUtils.calcTotals(items, _discountPct.value)
-    val parsedCash = cashInput.toDoubleOrNull()
-    if (cashInput.isNotBlank() && (parsedCash == null || parsedCash < totals.total - 0.001)) {
+    val normalizedCash = cashInput.trim().replace(',', '.')
+    val parsedCash = normalizedCash.toDoubleOrNull()
+    if (normalizedCash.isNotBlank() && (parsedCash == null || parsedCash < totals.total - 0.001)) {
       val missing = PharmacyUtils.q(totals.total - (parsedCash ?: 0.0))
-      notify("Efectivo insuficiente (faltan $missing)", isError = true)
+      val msg = "Efectivo insuficiente (faltan $missing)"
+      _saleError.value = msg
+      notify(msg, isError = true)
       return
     }
 
+    _saleError.value = null
     val clientId = _selectedClientId.value
     val clientName = clientes.value.find { it.id == clientId }?.nombre
 
@@ -324,7 +347,7 @@ class FarmaciaViewModel(
         currentSalesCount = ventas.value.size,
       ).fold(
         onSuccess = { saved ->
-          val paid = if (cashInput.isNotBlank() && parsedCash != null) parsedCash else saved.venta.total
+          val paid = if (normalizedCash.isNotBlank() && parsedCash != null) parsedCash else saved.venta.total
           _lastReceipt.value = SaleReceiptData(
             codigo = saved.venta.codigo,
             fechaMillis = saved.venta.fecha,
@@ -342,11 +365,14 @@ class FarmaciaViewModel(
           )
           _cart.value = emptyList()
           _discountPct.value = 0.0
+          _saleError.value = null
           val ptsMsg = if (saved.venta.puntos > 0) " · +${saved.venta.puntos} Puntos Salud" else ""
           notify("Venta ${saved.venta.codigo} guardada (${PharmacyUtils.q(saved.venta.total)})$ptsMsg")
         },
         onFailure = { err ->
-          notify(err.localizedMessage ?: "Error al registrar venta", isError = true)
+          val msg = err.localizedMessage ?: "Error al registrar venta"
+          _saleError.value = msg
+          notify(msg, isError = true)
         },
       )
       _isProcessingSale.value = false
